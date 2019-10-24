@@ -196,6 +196,7 @@ class InputFeatures(object):
                segment_ids,
                label_id,
                is_real_example=True):
+    self.guids = guids           
     self.input_ids = input_ids
     self.input_mask = input_mask
     self.segment_ids = segment_ids
@@ -231,6 +232,18 @@ class DataProcessor(object):
       for line in reader:
         lines.append(line)
       return lines
+
+  @classmethod
+  def _read_tsv_from_dir(cls, input_dir, quotechar=None):
+    """Reads a tab separated value file."""
+    input_files = [input_dir + "/" + i for i in tf.gfile.ListDirectory(input_dir)]
+    lines = []
+    for input_file in input_files:
+        with tf.gfile.Open(input_file, "r") as f:
+            reader = csv.reader((line.replace('\0','') for line in f), delimiter="\t", quotechar=quotechar)
+                for line in reader:
+                    lines.append(line)
+    return lines
 
 
 class XnliProcessor(DataProcessor):
@@ -408,12 +421,59 @@ class ColaProcessor(DataProcessor):
     return examples
 
 
+class QPProcessor(DataProcessor):
+  """Processor for the MRPC data set (GLUE version)."""
+
+  def get_train_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        #self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
+        self._read_tsv_from_dir(data_dir), "train")
+
+  def get_dev_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        #self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
+        self._read_tsv_from_dir(data_dir), "dev")
+
+  def get_test_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        #self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
+        self._read_tsv_from_dir(data_dir), "test")
+
+  def get_labels(self):
+    """See base class."""
+    return ["0", "1"]
+
+  def _create_examples(self, lines, set_type):
+    """Creates examples for the training and dev sets."""
+    examples = []
+    for (i, line) in enumerate(lines):
+      if i == 0:
+        continue
+      guid = line[0]
+      text_a = tokenization.preprocess_text(line[1], lower=FLAGS.do_lower_case)
+      text_b = tokenization.preprocess_text(line[2], lower=FLAGS.do_lower_case)
+      if set_type == "test":
+        guid = line[0]
+        label = "0"
+      else:
+        label = tokenization.preprocess_text(line[3])
+      examples.append(
+          InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+
+    return examples
+
+
+
 def convert_single_example(ex_index, example, label_list, max_seq_length,
                            tokenizer):
   """Converts a single `InputExample` into a single `InputFeatures`."""
 
   if isinstance(example, PaddingInputExample):
     return InputFeatures(
+        guid = [bytes(example.guid, 'utf-8')],
         input_ids=[0] * max_seq_length,
         input_mask=[0] * max_seq_length,
         segment_ids=[0] * max_seq_length,
@@ -502,6 +562,7 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
     tf.logging.info("label: %s (id = %d)" % (example.label, label_id))
 
   feature = InputFeatures(
+      guid = [bytes(example.guid, 'utf-8')],
       input_ids=input_ids,
       input_mask=input_mask,
       segment_ids=segment_ids,
@@ -528,6 +589,7 @@ def file_based_convert_examples_to_features(
       return f
 
     features = collections.OrderedDict()
+    features["guid"] = tf.train.Feature(bytes_list=tf.train.BytesList(value=feature.guid))
     features["input_ids"] = create_int_feature(feature.input_ids)
     features["input_mask"] = create_int_feature(feature.input_mask)
     features["segment_ids"] = create_int_feature(feature.segment_ids)
@@ -545,6 +607,7 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
   """Creates an `input_fn` closure to be passed to TPUEstimator."""
 
   name_to_features = {
+      "guid": tf.FixedLenFeature([], tf.string),
       "input_ids": tf.FixedLenFeature([seq_length], tf.int64),
       "input_mask": tf.FixedLenFeature([seq_length], tf.int64),
       "segment_ids": tf.FixedLenFeature([seq_length], tf.int64),
@@ -668,6 +731,7 @@ def model_fn_builder(albert_config, num_labels, init_checkpoint, learning_rate,
     for name in sorted(features.keys()):
       tf.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
 
+    guid = features["guid"]
     input_ids = features["input_ids"]
     input_mask = features["input_mask"]
     segment_ids = features["segment_ids"]
@@ -741,7 +805,8 @@ def model_fn_builder(albert_config, num_labels, init_checkpoint, learning_rate,
     else:
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
-          predictions={"probabilities": probabilities,
+          predictions={"guid": guid,
+                       "probabilities": probabilities,
                        "predictions": predictions},
           scaffold_fn=scaffold_fn)
     return output_spec
@@ -754,12 +819,14 @@ def model_fn_builder(albert_config, num_labels, init_checkpoint, learning_rate,
 def input_fn_builder(features, seq_length, is_training, drop_remainder):
   """Creates an `input_fn` closure to be passed to TPUEstimator."""
 
+  all_input_guids = []
   all_input_ids = []
   all_input_mask = []
   all_segment_ids = []
   all_label_ids = []
 
   for feature in features:
+    all_input_guids.append(feature.guid)
     all_input_ids.append(feature.input_ids)
     all_input_mask.append(feature.input_mask)
     all_segment_ids.append(feature.segment_ids)
@@ -775,6 +842,10 @@ def input_fn_builder(features, seq_length, is_training, drop_remainder):
     # not use Dataset.from_generator() because that uses tf.py_func which is
     # not TPU compatible. The right way to load data is with TFRecordReader.
     d = tf.data.Dataset.from_tensor_slices({
+        "guid":
+            tf.constant(
+                all_input_guids, shape=[num_examples, 1],
+                dtype=tf.string),
         "input_ids":
             tf.constant(
                 all_input_ids, shape=[num_examples, seq_length],
@@ -829,6 +900,7 @@ def main(_):
       "mnli": MnliProcessor,
       "mrpc": MrpcProcessor,
       "xnli": XnliProcessor,
+      "qp": QPProcessor,
   }
 
   tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
@@ -881,7 +953,8 @@ def main(_):
   num_train_steps = None
   num_warmup_steps = None
   if FLAGS.do_train:
-    train_examples = processor.get_train_examples(FLAGS.data_dir)
+    #train_examples = processor.get_train_examples(FLAGS.data_dir)
+    train_examples = processor.get_train_examples(FLAGS.trainnig_data_dir)
     num_train_steps = int(
         len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
     num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
@@ -908,8 +981,8 @@ def main(_):
 
   if FLAGS.do_train:
     train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
-    file_based_convert_examples_to_features(
-        train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
+    if not tf.gfile.Exists(file_path):
+      file_based_convert_examples_to_features(train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
     tf.logging.info("***** Running training *****")
     tf.logging.info("  Num examples = %d", len(train_examples))
     tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
@@ -922,7 +995,7 @@ def main(_):
     estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)
 
   if FLAGS.do_eval:
-    eval_examples = processor.get_dev_examples(FLAGS.data_dir)
+    eval_examples = processor.get_dev_examples(FLAGS.validation_data_dir)
     num_actual_eval_examples = len(eval_examples)
     if FLAGS.use_tpu:
       # TPU requires a fixed batch size for all batches, therefore the number
@@ -968,7 +1041,7 @@ def main(_):
         writer.write("%s = %s\n" % (key, str(result[key])))
 
   if FLAGS.do_predict:
-    predict_examples = processor.get_test_examples(FLAGS.data_dir)
+    predict_examples = processor.get_test_examples(FLAGS.prediction_data_dir)
     num_actual_predict_examples = len(predict_examples)
     if FLAGS.use_tpu:
       # TPU requires a fixed batch size for all batches, therefore the number
@@ -1000,29 +1073,27 @@ def main(_):
 
     output_predict_file = os.path.join(FLAGS.output_dir, "test_results.tsv")
     output_submit_file = os.path.join(FLAGS.output_dir, "submit_results.tsv")
-    with tf.gfile.GFile(output_predict_file, "w") as pred_writer,\
-        tf.gfile.GFile(output_submit_file, "w") as sub_writer:
+    with tf.gfile.GFile(output_predict_file, "w") as pred_writer:
+      #tf.gfile.GFile(output_submit_file, "w") as sub_writer:
       num_written_lines = 0
       tf.logging.info("***** Predict results *****")
-      for (i, (example, prediction)) in\
-          enumerate(zip(predict_examples, result)):
+      for (i, (example, prediction)) in enumerate(zip(predict_examples, result)):
+        guid = prediction["guid"]
         probabilities = prediction["probabilities"]
         if i >= num_actual_predict_examples:
           break
-        output_line = "\t".join(
-            str(class_probability)
-            for class_probability in probabilities) + "\n"
+        #output_line = "\t".join(str(class_probability) for class_probability in probabilities) + "\n"
+        output_line = guid.decode("utf-8") + "\t" + "\t".join(str(class_probability) for class_probability in probabilities) + "\n"
         pred_writer.write(output_line)
 
-        actual_label = label_list[int(prediction["predictions"])]
-        sub_writer.write(
-            six.ensure_str(example.guid) + "\t" + actual_label + "\n")
+        #actual_label = label_list[int(prediction["predictions"])]
+        #sub_writer.write(six.ensure_str(example.guid) + "\t" + actual_label + "\n")
         num_written_lines += 1
     assert num_written_lines == num_actual_predict_examples
 
 
 if __name__ == "__main__":
-  flags.mark_flag_as_required("data_dir")
+  #flags.mark_flag_as_required("data_dir")
   flags.mark_flag_as_required("task_name")
   flags.mark_flag_as_required("vocab_file")
   flags.mark_flag_as_required("albert_config_file")
