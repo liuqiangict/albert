@@ -239,14 +239,15 @@ def main(_):
       predict_batch_size=FLAGS.predict_batch_size)
 
   if FLAGS.do_train:
+    train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
     train_features = run_classifier_sp.convert_examples_to_features(
-        train_examples, label_list, FLAGS.max_seq_length, tokenizer)
+        train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
     tf.logging.info("***** Running training *****")
     tf.logging.info("  Num examples = %d", len(train_examples))
     tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
     tf.logging.info("  Num steps = %d", num_train_steps)
-    train_input_fn = run_classifier_sp.input_fn_builder(
-        features=train_features,
+    train_input_fn = run_classifier_sp.file_based_input_fn_builder(
+        input_file=train_file,
         seq_length=FLAGS.max_seq_length,
         is_training=True,
         drop_remainder=True)
