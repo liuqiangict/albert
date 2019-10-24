@@ -456,13 +456,13 @@ class QPProcessor(DataProcessor):
       if i == 0:
         continue
       guid = line[0]
-      text_a = tokenization.preprocess_text(line[3], lower=FLAGS.do_lower_case)
-      text_b = tokenization.preprocess_text(line[4], lower=FLAGS.do_lower_case)
+      text_a = tokenization.preprocess_text(line[1], lower=FLAGS.do_lower_case)
+      text_b = tokenization.preprocess_text(line[2], lower=FLAGS.do_lower_case)
       if set_type == "test":
         guid = line[0]
         label = "0"
       else:
-        label = tokenization.preprocess_text(line[0])
+        label = tokenization.preprocess_text(line[3])
       examples.append(
           InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
 
