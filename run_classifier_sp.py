@@ -453,8 +453,6 @@ class QPProcessor(DataProcessor):
     """Creates examples for the training and dev sets."""
     examples = []
     for (i, line) in enumerate(lines):
-      if i == 0:
-        continue
       guid = line[0]
       text_a = tokenization.preprocess_text(line[1], lower=FLAGS.do_lower_case)
       text_b = tokenization.preprocess_text(line[2], lower=FLAGS.do_lower_case)
