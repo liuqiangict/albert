@@ -156,6 +156,11 @@ def create_tokenizer_from_hub_module(albert_hub_module_handle):
     with tf.Session() as sess:
       vocab_file, do_lower_case = sess.run([tokenization_info["vocab_file"],
                                             tokenization_info["do_lower_case"]])
+
+  print('*' * 100)
+  print('vocab_file:', vocab_file)
+  print('spm_model_file:', FLAGS.spm_model_file)
+  print('*' * 100)
   return tokenization.FullTokenizer(
       vocab_file=vocab_file, do_lower_case=do_lower_case,
       spm_model_file=FLAGS.spm_model_file)

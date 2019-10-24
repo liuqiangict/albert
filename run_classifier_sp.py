@@ -236,13 +236,13 @@ class DataProcessor(object):
   @classmethod
   def _read_tsv_from_dir(cls, input_dir, quotechar=None):
     """Reads a tab separated value file."""
-    input_files = [input_dir + "/" + i for i in tf.gfile.ListDirectory(input_dir)]
+    input_files = [input_dir + "/" + filename for filename in tf.gfile.ListDirectory(input_dir)]
     lines = []
     for input_file in input_files:
-        with tf.gfile.Open(input_file, "r") as f:
-            reader = csv.reader((line.replace('\0','') for line in f), delimiter="\t", quotechar=quotechar)
-                for line in reader:
-                    lines.append(line)
+      with tf.gfile.Open(input_file, "r") as f:
+        reader = csv.reader((line.replace('\0','') for line in f), delimiter="\t", quotechar=quotechar)
+        for line in reader:
+          lines.append(line)
     return lines
 
 
@@ -453,13 +453,13 @@ class QPProcessor(DataProcessor):
       if i == 0:
         continue
       guid = line[0]
-      text_a = tokenization.preprocess_text(line[1], lower=FLAGS.do_lower_case)
-      text_b = tokenization.preprocess_text(line[2], lower=FLAGS.do_lower_case)
+      text_a = tokenization.preprocess_text(line[3], lower=FLAGS.do_lower_case)
+      text_b = tokenization.preprocess_text(line[4], lower=FLAGS.do_lower_case)
       if set_type == "test":
         guid = line[0]
         label = "0"
       else:
-        label = tokenization.preprocess_text(line[3])
+        label = tokenization.preprocess_text(line[0])
       examples.append(
           InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
 
@@ -981,8 +981,7 @@ def main(_):
 
   if FLAGS.do_train:
     train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
-    if not tf.gfile.Exists(file_path):
-      file_based_convert_examples_to_features(train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
+    file_based_convert_examples_to_features(train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
     tf.logging.info("***** Running training *****")
     tf.logging.info("  Num examples = %d", len(train_examples))
     tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
@@ -1095,7 +1094,7 @@ def main(_):
 if __name__ == "__main__":
   #flags.mark_flag_as_required("data_dir")
   flags.mark_flag_as_required("task_name")
-  flags.mark_flag_as_required("vocab_file")
+  #flags.mark_flag_as_required("vocab_file")
   flags.mark_flag_as_required("albert_config_file")
   flags.mark_flag_as_required("output_dir")
   tf.app.run()
