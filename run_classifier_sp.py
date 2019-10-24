@@ -111,6 +111,8 @@ flags.DEFINE_integer("predict_batch_size", 8, "Total batch size for predict.")
 
 flags.DEFINE_float("learning_rate", 5e-5, "The initial learning rate for Adam.")
 
+flags.DEFINE_integer("hooking_frequence", 100, "The frequence of print loss during training.")
+
 flags.DEFINE_float("num_train_epochs", 3.0,
                    "Total number of training epochs to perform.")
 
@@ -190,13 +192,13 @@ class InputFeatures(object):
   """A single set of features of data."""
 
   def __init__(self,
-               guids,
+               guid,
                input_ids,
                input_mask,
                segment_ids,
                label_id,
                is_real_example=True):
-    self.guids = guids           
+    self.guid = guid
     self.input_ids = input_ids
     self.input_mask = input_mask
     self.segment_ids = segment_ids
@@ -425,6 +427,7 @@ class QPProcessor(DataProcessor):
   """Processor for the MRPC data set (GLUE version)."""
 
   def get_train_examples(self, data_dir):
+    print(data_dir)
     """See base class."""
     return self._create_examples(
         #self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
@@ -775,13 +778,16 @@ def model_fn_builder(albert_config, num_labels, init_checkpoint, learning_rate,
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
 
-      train_op = optimization.create_optimizer(
+      global_step, train_op, update_learning_rate = optimization.create_optimizer(
           total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
 
+
+      logging_hook = tf.train.LoggingTensorHook({"loss": total_loss, "learning_rate" : update_learning_rate, "global_step": global_step}, every_n_iter=FLAGS.hooking_frequence)
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
           loss=total_loss,
           train_op=train_op,
+          training_hooks=[logging_hook],
           scaffold_fn=scaffold_fn)
     elif mode == tf.estimator.ModeKeys.EVAL:
 

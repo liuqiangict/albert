@@ -21,6 +21,7 @@ from __future__ import print_function
 
 import os
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 import tensorflow as tf
 import tensorflow_hub as hub
 
@@ -112,13 +113,15 @@ def model_fn_builder(num_labels, learning_rate, num_train_steps,
 
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
-      train_op = optimization.create_optimizer(
+      global_step, train_op, update_learning_rate = optimization.create_optimizer(
           total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
 
+      logging_hook = tf.train.LoggingTensorHook({"loss": total_loss, "learning_rate" : update_learning_rate, "global_step": global_step}, every_n_iter=FLAGS.hooking_frequence)
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
           loss=total_loss,
-          train_op=train_op)
+          train_op=train_op,
+          training_hooks=[logging_hook])
     elif mode == tf.estimator.ModeKeys.EVAL:
 
       def metric_fn(per_example_loss, label_ids, logits):
@@ -173,6 +176,7 @@ def main(_):
       "cola": run_classifier_sp.ColaProcessor,
       "mnli": run_classifier_sp.MnliProcessor,
       "mrpc": run_classifier_sp.MrpcProcessor,
+      "qp": run_classifier_sp.QPProcessor,
   }
 
   if not FLAGS.do_train and not FLAGS.do_eval:
@@ -211,7 +215,7 @@ def main(_):
   num_train_steps = None
   num_warmup_steps = None
   if FLAGS.do_train:
-    train_examples = processor.get_train_examples(FLAGS.data_dir)
+    train_examples = processor.get_train_examples(FLAGS.trainnig_data_dir)
     num_train_steps = int(
         len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
     num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
@@ -249,7 +253,7 @@ def main(_):
     estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)
 
   if FLAGS.do_eval:
-    eval_examples = processor.get_dev_examples(FLAGS.data_dir)
+    eval_examples = processor.get_dev_examples(FLAGS.validation_data_dir)
     eval_features = run_classifier_sp.convert_examples_to_features(
         eval_examples, label_list, FLAGS.max_seq_length, tokenizer)
 
@@ -283,7 +287,7 @@ def main(_):
         writer.write("%s = %s\n" % (key, str(result[key])))
 
   if FLAGS.do_predict:
-    predict_examples = processor.get_test_examples(FLAGS.data_dir)
+    predict_examples = processor.get_test_examples(FLAGS.prediction_data_dir)
     if FLAGS.use_tpu:
       # Discard batch remainder if running on TPU
       n = len(predict_examples)
@@ -318,7 +322,7 @@ def main(_):
 
 
 if __name__ == "__main__":
-  flags.mark_flag_as_required("data_dir")
+  #flags.mark_flag_as_required("data_dir")
   flags.mark_flag_as_required("task_name")
   flags.mark_flag_as_required("albert_hub_module_handle")
   flags.mark_flag_as_required("output_dir")
