@@ -43,6 +43,21 @@ flags.DEFINE_string(
     "for the task.")
 
 flags.DEFINE_string(
+    "trainnig_data_dir", None,
+    "The input data dir. Should contain the .tsv files (or other data files) "
+    "for the task.")
+
+flags.DEFINE_string(
+    "validation_data_dir", None,
+    "The input data dir. Should contain the .tsv files (or other data files) "
+    "for the task.")
+
+flags.DEFINE_string(
+    "prediction_data_dir", None,
+    "The input data dir. Should contain the .tsv files (or other data files) "
+    "for the task.")
+
+flags.DEFINE_string(
     "albert_config_file", None,
     "The config json file corresponding to the pre-trained ALBERT model. "
     "This specifies the model architecture.")
@@ -175,6 +190,7 @@ class InputFeatures(object):
   """A single set of features of data."""
 
   def __init__(self,
+               guids,
                input_ids,
                input_mask,
                segment_ids,
