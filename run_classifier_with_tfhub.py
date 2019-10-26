@@ -20,8 +20,8 @@ from __future__ import division
 from __future__ import print_function
 
 import os
+from sklearn.metrics import roc_auc_score
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 import tensorflow as tf
 import tensorflow_hub as hub
 
@@ -100,6 +100,7 @@ def model_fn_builder(num_labels, learning_rate, num_train_steps,
     for name in sorted(features.keys()):
       tf.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
 
+    guid = features["guid"]
     input_ids = features["input_ids"]
     input_mask = features["input_mask"]
     segment_ids = features["segment_ids"]
@@ -140,7 +141,14 @@ def model_fn_builder(num_labels, learning_rate, num_train_steps,
           eval_metrics=eval_metrics)
     elif mode == tf.estimator.ModeKeys.PREDICT:
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
-          mode=mode, predictions={"probabilities": probabilities})
+          mode=mode, 
+          predictions={
+            "guid": guid,
+            "probabilities": probabilities,
+            #"predictions": predictions,
+            "labels": label_ids            
+            }
+        )
     else:
       raise ValueError(
           "Only TRAIN, EVAL and PREDICT modes are supported: %s" % (mode))
@@ -179,7 +187,7 @@ def main(_):
       "qp": run_classifier_sp.QPProcessor,
   }
 
-  if not FLAGS.do_train and not FLAGS.do_eval:
+  if not FLAGS.do_train and not FLAGS.do_eval and not FLAGS.do_predict:
     raise ValueError("At least one of `do_train` or `do_eval` must be True.")
 
   tf.gfile.MakeDirs(FLAGS.output_dir)
@@ -205,6 +213,7 @@ def main(_):
       cluster=tpu_cluster_resolver,
       master=FLAGS.master,
       model_dir=FLAGS.output_dir,
+      #model_dir=FLAGS.input_previous_model_path,
       save_checkpoints_steps=FLAGS.save_checkpoints_steps,
       keep_checkpoint_max=FLAGS.keep_checkpoint_max,
       log_step_count_steps=FLAGS.log_step_count_steps,
@@ -290,39 +299,59 @@ def main(_):
         writer.write("%s = %s\n" % (key, str(result[key])))
 
   if FLAGS.do_predict:
+    '''
     predict_examples = processor.get_test_examples(FLAGS.prediction_data_dir)
+    num_actual_predict_examples = len(predict_examples)
     if FLAGS.use_tpu:
-      # Discard batch remainder if running on TPU
-      n = len(predict_examples)
-      predict_examples = predict_examples[:(n - n % FLAGS.predict_batch_size)]
+      while len(predict_examples) % FLAGS.predict_batch_size != 0:
+        predict_examples.append(PaddingInputExample())
 
     predict_file = os.path.join(FLAGS.output_dir, "predict.tf_record")
-    run_classifier_sp.file_based_convert_examples_to_features(
-        predict_examples, label_list, FLAGS.max_seq_length, tokenizer,
-        predict_file)
+    run_classifier_sp.file_based_convert_examples_to_features(predict_examples, label_list, FLAGS.max_seq_length, tokenizer, predict_file)
+    '''
 
-    tf.logging.info("***** Running prediction*****")
-    tf.logging.info("  Num examples = %d", len(predict_examples))
-    tf.logging.info("  Batch size = %d", FLAGS.predict_batch_size)
+    evals = {
+        'google': './data/eval/tf_records/google.tf_record',
+        'bing_ann': './data/eval/tf_records/bing_ann.tf_record',
+        'uhrs': './data/eval/tf_records/uhrs.tf_record',
+        'panelone_5k': './data/eval/tf_records/panelone_5k.tf_record',
+        'adversial': './data/eval/tf_records/adverserial.tf_record',
+        'speller_checked': './data/eval/tf_records/speller_checked.tf_record',
+        'speller_usertyped': './data/eval/tf_records/speller_usertyped.tf_record',
+    }
 
-    predict_input_fn = run_classifier_sp.file_based_input_fn_builder(
-        input_file=predict_file,
-        seq_length=FLAGS.max_seq_length,
-        is_training=False,
-        drop_remainder=FLAGS.use_tpu)
 
-    result = estimator.predict(input_fn=predict_input_fn)
+    for eval_name, predict_file in evals.items():
+      tf.logging.info("***** Running prediction*****")
+      #print("Eval name: ", eval_name)
+      #print("Eval file: ", predict_file)
+      tf.logging.info("  Batch size = %d", FLAGS.predict_batch_size)
+      predict_drop_remainder = True if FLAGS.use_tpu else False
+      predict_input_fn = run_classifier_sp.file_based_input_fn_builder(
+          input_file=predict_file,
+          seq_length=FLAGS.max_seq_length,
+          is_training=False,
+          drop_remainder=predict_drop_remainder)
 
-    output_predict_file = os.path.join(FLAGS.output_dir, "test_results.tsv")
-    with tf.gfile.GFile(output_predict_file, "w") as writer:
-      tf.logging.info("***** Predict results *****")
-      for prediction in result:
-        probabilities = prediction["probabilities"]
-        output_line = "\t".join(
-            str(class_probability)
-            for class_probability in probabilities) + "\n"
-        writer.write(output_line)
+      result = estimator.predict(input_fn=predict_input_fn)
 
+      #output_predict_file = os.path.join(FLAGS.output_dir, eval_name + "_eval.tsv")
+      output_predict_file = os.path.join(FLAGS.output_dir, eval_name + "eval.tsv")
+      labels = []
+      scores = []
+      with tf.gfile.GFile(output_predict_file, "w") as pred_writer:
+        num_written_lines = 0
+        tf.logging.info("***** Predict results *****")
+        for (i, prediction) in enumerate(result):
+          guid = prediction["guid"]
+          probabilities = prediction["probabilities"]
+          label = prediction["labels"]
+          output_line = guid.decode("utf-8") + "\t" + str(label) + '\t' + "\t".join(str(class_probability) for class_probability in probabilities) + "\n"
+          pred_writer.write(output_line)
+          labels.append(label)
+          scores.append(probabilities[1])
+        auc = roc_auc_score(labels, scores)
+        print(eval_name, ':\t', auc)
 
 if __name__ == "__main__":
   #flags.mark_flag_as_required("data_dir")

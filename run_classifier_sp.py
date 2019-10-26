@@ -77,6 +77,10 @@ flags.DEFINE_string(
 
 ## Other parameters
 
+flags.DEFINE_string('input_previous_model_path', '', 'initial model dir')
+flags.DEFINE_string("init_checkpoint_name", None, "Initial checkpoint (usually from a pre-trained BERT model).")
+
+
 flags.DEFINE_string(
     "init_checkpoint", None,
     "Initial checkpoint (usually from a pre-trained ALBERT model).")
@@ -242,7 +246,7 @@ class DataProcessor(object):
   @classmethod
   def _read_tsv_from_dir(cls, input_dir, quotechar=None):
     """Reads a tab separated value file."""
-    input_files = [input_dir + "/" + filename for filename in tf.gfile.ListDirectory(input_dir)]
+    input_files = [os.path.join(input_dir, filename) for filename in tf.gfile.ListDirectory(input_dir)]
     lines = []
     for input_file in input_files:
       with tf.gfile.Open(input_file, "r") as f:
@@ -460,11 +464,7 @@ class QPProcessor(DataProcessor):
       guid = line[0]
       text_a = tokenization.preprocess_text(line[1], lower=FLAGS.do_lower_case)
       text_b = tokenization.preprocess_text(line[2], lower=FLAGS.do_lower_case)
-      if set_type == "test":
-        guid = line[0]
-        label = "0"
-      else:
-        label = tokenization.preprocess_text(line[3])
+      label = tokenization.preprocess_text(line[3])
       examples.append(
           InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
 
@@ -756,11 +756,13 @@ def model_fn_builder(albert_config, num_labels, init_checkpoint, learning_rate,
     tvars = tf.trainable_variables()
     initialized_variable_names = {}
     scaffold_fn = None
+    print('*' * 150)
+    print(init_checkpoint)
     if init_checkpoint:
-      (assignment_map, initialized_variable_names
-      ) = modeling.get_assignment_map_from_checkpoint(tvars, init_checkpoint)
+      (assignment_map, initialized_variable_names) = modeling.get_assignment_map_from_checkpoint(tvars, init_checkpoint)
+      print(initialized_variable_names)
+      print(assignment_map)
       if use_tpu:
-
         def tpu_scaffold():
           tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
           return tf.train.Scaffold()
@@ -768,14 +770,16 @@ def model_fn_builder(albert_config, num_labels, init_checkpoint, learning_rate,
         scaffold_fn = tpu_scaffold
       else:
         tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
+        print(initialized_variable_names)
+        print(assignment_map)
+        exit()
 
     tf.logging.info("**** Trainable Variables ****")
     for var in tvars:
       init_string = ""
       if var.name in initialized_variable_names:
         init_string = ", *INIT_FROM_CKPT*"
-      tf.logging.info("  name = %s, shape = %s%s", var.name, var.shape,
-                      init_string)
+      tf.logging.info("  name = %s, shape = %s%s", var.name, var.shape, init_string)
 
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
@@ -815,7 +819,8 @@ def model_fn_builder(albert_config, num_labels, init_checkpoint, learning_rate,
           mode=mode,
           predictions={"guid": guid,
                        "probabilities": probabilities,
-                       "predictions": predictions},
+                       "predictions": predictions,
+                       "labels": label_ids},
           scaffold_fn=scaffold_fn)
     return output_spec
 
@@ -911,8 +916,18 @@ def main(_):
       "qp": QPProcessor,
   }
 
-  tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
-                                                FLAGS.init_checkpoint)
+  if FLAGS.init_checkpoint_name == None:
+      ckpt = tf.train.get_checkpoint_state(FLAGS.input_previous_model_path)
+      if ckpt and ckpt.model_checkpoint_path:
+          init_checkpoint = os.path.join(FLAGS.input_previous_model_path, ckpt.model_checkpoint_path.split('/')[-1])
+      else:
+          tf.logging.info("Can not find initial model!")
+  else:
+      init_checkpoint = os.path.join(FLAGS.input_previous_model_path, FLAGS.init_checkpoint_name)
+
+  tf.logging.info("Initialize model from: {}.".format(init_checkpoint))
+
+  tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case, init_checkpoint)
 
   if not FLAGS.do_train and not FLAGS.do_eval and not FLAGS.do_predict:
     raise ValueError(
@@ -950,7 +965,7 @@ def main(_):
   run_config = tf.contrib.tpu.RunConfig(
       cluster=tpu_cluster_resolver,
       master=FLAGS.master,
-      model_dir=FLAGS.output_dir,
+      model_dir=FLAGS.input_previous_model_path,
       save_checkpoints_steps=FLAGS.save_checkpoints_steps,
       keep_checkpoint_max=FLAGS.keep_checkpoint_max,
       log_step_count_steps=FLAGS.log_step_count_steps,
@@ -972,7 +987,7 @@ def main(_):
   model_fn = model_fn_builder(
       albert_config=albert_config,
       num_labels=len(label_list),
-      init_checkpoint=FLAGS.init_checkpoint,
+      init_checkpoint=init_checkpoint,
       learning_rate=FLAGS.learning_rate,
       num_train_steps=num_train_steps,
       num_warmup_steps=num_warmup_steps,
@@ -1051,27 +1066,21 @@ def main(_):
         writer.write("%s = %s\n" % (key, str(result[key])))
 
   if FLAGS.do_predict:
+    
     predict_examples = processor.get_test_examples(FLAGS.prediction_data_dir)
     num_actual_predict_examples = len(predict_examples)
     if FLAGS.use_tpu:
-      # TPU requires a fixed batch size for all batches, therefore the number
-      # of examples must be a multiple of the batch size, or else examples
-      # will get dropped. So we pad with fake examples which are ignored
-      # later on.
       while len(predict_examples) % FLAGS.predict_batch_size != 0:
         predict_examples.append(PaddingInputExample())
 
     predict_file = os.path.join(FLAGS.output_dir, "predict.tf_record")
-    file_based_convert_examples_to_features(predict_examples, label_list,
-                                            FLAGS.max_seq_length, tokenizer,
-                                            predict_file)
+    file_based_convert_examples_to_features(predict_examples, label_list, FLAGS.max_seq_length, tokenizer, predict_file)
 
     tf.logging.info("***** Running prediction*****")
     tf.logging.info("  Num examples = %d (%d actual, %d padding)",
-                    len(predict_examples), num_actual_predict_examples,
-                    len(predict_examples) - num_actual_predict_examples)
+                  len(predict_examples), num_actual_predict_examples,
+                  len(predict_examples) - num_actual_predict_examples)
     tf.logging.info("  Batch size = %d", FLAGS.predict_batch_size)
-
     predict_drop_remainder = True if FLAGS.use_tpu else False
     predict_input_fn = file_based_input_fn_builder(
         input_file=predict_file,
@@ -1081,25 +1090,17 @@ def main(_):
 
     result = estimator.predict(input_fn=predict_input_fn)
 
-    output_predict_file = os.path.join(FLAGS.output_dir, "test_results.tsv")
-    output_submit_file = os.path.join(FLAGS.output_dir, "submit_results.tsv")
+    #output_predict_file = os.path.join(FLAGS.output_dir, eval_name + "_eval.tsv")
+    output_predict_file = os.path.join(FLAGS.output_dir, "eval.tsv")
     with tf.gfile.GFile(output_predict_file, "w") as pred_writer:
-      #tf.gfile.GFile(output_submit_file, "w") as sub_writer:
       num_written_lines = 0
       tf.logging.info("***** Predict results *****")
-      for (i, (example, prediction)) in enumerate(zip(predict_examples, result)):
+      for (i, prediction) in enumerate(result):
         guid = prediction["guid"]
         probabilities = prediction["probabilities"]
-        if i >= num_actual_predict_examples:
-          break
-        #output_line = "\t".join(str(class_probability) for class_probability in probabilities) + "\n"
-        output_line = guid.decode("utf-8") + "\t" + "\t".join(str(class_probability) for class_probability in probabilities) + "\n"
+        label = prediction["labels"]
+        output_line = guid.decode("utf-8") + "\t" + str(label) + '\t' + "\t".join(str(class_probability) for class_probability in probabilities) + "\n"
         pred_writer.write(output_line)
-
-        #actual_label = label_list[int(prediction["predictions"])]
-        #sub_writer.write(six.ensure_str(example.guid) + "\t" + actual_label + "\n")
-        num_written_lines += 1
-    assert num_written_lines == num_actual_predict_examples
 
 
 if __name__ == "__main__":
