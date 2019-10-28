@@ -212,8 +212,8 @@ def main(_):
   run_config = tf.contrib.tpu.RunConfig(
       cluster=tpu_cluster_resolver,
       master=FLAGS.master,
-      model_dir=FLAGS.output_dir,
-      #model_dir=FLAGS.input_previous_model_path,
+      #model_dir=FLAGS.output_dir,
+      model_dir=FLAGS.input_previous_model_path,
       save_checkpoints_steps=FLAGS.save_checkpoints_steps,
       keep_checkpoint_max=FLAGS.keep_checkpoint_max,
       log_step_count_steps=FLAGS.log_step_count_steps,
