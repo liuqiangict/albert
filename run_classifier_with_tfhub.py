@@ -311,16 +311,16 @@ def main(_):
     '''
 
     evals = {
-        'google': './data/eval/tf_records/google.tf_record',
+        #'google': './data/eval/tf_records/google.tf_record',
         'bing_ann': './data/eval/tf_records/bing_ann.tf_record',
-        'uhrs': './data/eval/tf_records/uhrs.tf_record',
-        'panelone_5k': './data/eval/tf_records/panelone_5k.tf_record',
-        'adversial': './data/eval/tf_records/adverserial.tf_record',
-        'speller_checked': './data/eval/tf_records/speller_checked.tf_record',
-        'speller_usertyped': './data/eval/tf_records/speller_usertyped.tf_record',
+        #'uhrs': './data/eval/tf_records/uhrs.tf_record',
+        #'panelone_5k': './data/eval/tf_records/panelone_5k.tf_record',
+        #'adversial': './data/eval/tf_records/adverserial.tf_record',
+        #'speller_checked': './data/eval/tf_records/speller_checked.tf_record',
+        #'speller_usertyped': './data/eval/tf_records/speller_usertyped.tf_record',
     }
 
-
+    aucs = []
     for eval_name, predict_file in evals.items():
       tf.logging.info("***** Running prediction*****")
       #print("Eval name: ", eval_name)
@@ -351,7 +351,14 @@ def main(_):
           labels.append(label)
           scores.append(probabilities[1])
         auc = roc_auc_score(labels, scores)
-        print(eval_name, ':\t', auc)
+        aucs.append(auc)
+        print('AUC\t', eval_name, '\t', auc)
+
+    output_auc_summary_file = os.path.join(FLAGS.output_dir, "auc_summary.tsv")
+    with tf.gfile.GFile(output_auc_summary_file, "w") as writer:
+        writer.write('\t'.join([str(auc) for auc in aucs]) + '\n')
+
+
 
 if __name__ == "__main__":
   #flags.mark_flag_as_required("data_dir")
