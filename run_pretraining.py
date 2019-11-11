@@ -26,8 +26,10 @@ import time
 from six.moves import range
 import tensorflow as tf
 
-from albert import modeling
-from albert import optimization
+#from albert import modeling
+#from albert import optimization
+import modeling
+import optimization
 
 flags = tf.flags
 

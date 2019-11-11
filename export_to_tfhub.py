@@ -26,7 +26,8 @@ from absl import flags
 import tensorflow as tf
 import tensorflow_hub as hub
 
-from albert import modeling
+#from albert import modeling
+import modeling
 
 flags.DEFINE_string(
     "albert_directory", None,
