@@ -25,9 +25,12 @@ from sklearn.metrics import roc_auc_score
 import tensorflow as tf
 import tensorflow_hub as hub
 
-from albert import optimization
-from albert import run_classifier_sp
-from albert import tokenization
+#from albert import optimization
+#from albert import run_classifier_sp
+#from albert import tokenization
+import optimization
+import run_classifier_sp
+import tokenization
 
 flags = tf.flags
 

@@ -28,9 +28,12 @@ import six
 from six.moves import zip
 import tensorflow as tf
 
-from albert import modeling
-from albert import optimization
-from albert import tokenization
+#from albert import modeling
+#from albert import optimization
+#from albert import tokenization
+import modeling
+import optimization
+import tokenization
 
 flags = tf.flags
 
