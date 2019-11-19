@@ -775,7 +775,6 @@ def model_fn_builder(albert_config, num_labels, init_checkpoint, learning_rate,
         tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
         print(initialized_variable_names)
         print(assignment_map)
-        exit()
 
     tf.logging.info("**** Trainable Variables ****")
     for var in tvars:
@@ -1111,5 +1110,6 @@ if __name__ == "__main__":
   flags.mark_flag_as_required("task_name")
   #flags.mark_flag_as_required("vocab_file")
   flags.mark_flag_as_required("albert_config_file")
+  flags.mark_flag_as_required("input_previous_model_path")
   flags.mark_flag_as_required("output_dir")
   tf.app.run()
